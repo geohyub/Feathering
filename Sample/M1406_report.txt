@@ -1,0 +1,28 @@
+======================================================================
+  FEATHERING ANALYSIS REPORT - M1406
+======================================================================
+
+Planned Azimuth: 289.0°
+Run-in Distance: 200.0 m
+Run-out Distance: 200.0 m
+Total Records: 21475
+
+----------------------------------------------------------------------
+MAIN LINE STATISTICS (Run-in/out Excluded)
+----------------------------------------------------------------------
+Mean Feathering:       -9.30° (±6.28°)
+Minimum:              -25.90°
+Maximum:               12.41°
+Range:                 38.31°
+
+----------------------------------------------------------------------
+FEATHERING LIMIT ANALYSIS (±20.0°)
+----------------------------------------------------------------------
+Exceeded Points:    370 (1.7%)
+Max Exceedance:     25.90°
+Mean of Exceeded:   -21.65°
+
+⚠️  Feathering exceeded the specified limit.
+   Review the track plot for exact locations.
+
+======================================================================
