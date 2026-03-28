@@ -8,6 +8,9 @@ import sys
 import json
 import traceback
 import os
+import re
+from datetime import datetime
+from difflib import SequenceMatcher
 from pathlib import Path
 
 import numpy as np
@@ -51,6 +54,271 @@ def handle_scan_headers(params: dict) -> dict:
     path = params["path"]
     headers = analyzer.scan_npd_headers(path)
     return {"headers": headers}
+
+
+def _numeric_summary(values: np.ndarray) -> dict:
+    if values.size == 0:
+        return {
+            "mean": 0.0,
+            "std": 0.0,
+            "min": 0.0,
+            "max": 0.0,
+            "range": 0.0,
+        }
+
+    return {
+        "mean": float(np.mean(values)),
+        "std": float(np.std(values)),
+        "min": float(np.min(values)),
+        "max": float(np.max(values)),
+        "range": float(np.ptp(values)),
+    }
+
+
+def _build_analysis_summary(
+    feathering: np.ndarray,
+    ffid_arr: np.ndarray,
+    distance_m: np.ndarray,
+    *,
+    npd_records: int,
+    track_records: int,
+    matched_records: int,
+    line_name: str,
+    fast_match: bool,
+    tolerance_s: float | None,
+    head_position: str,
+    tail_position: str,
+    feathering_limit: float,
+    run_in_ffid: int | None,
+    run_out_ffid: int | None,
+) -> dict:
+    if feathering.size == 0:
+        raise ValueError("분석 요약을 만들 데이터가 없습니다.")
+
+    main_mask = np.ones_like(feathering, dtype=bool)
+    if run_in_ffid is not None:
+        main_mask &= ffid_arr >= run_in_ffid
+    if run_out_ffid is not None:
+        main_mask &= ffid_arr <= run_out_ffid
+
+    if not np.any(main_mask):
+        main_mask = np.ones_like(feathering, dtype=bool)
+
+    main_indices = np.where(main_mask)[0]
+    main_ffids = ffid_arr[main_indices]
+    main_feathering = feathering[main_mask]
+
+    total_distance_m = float(distance_m[-1]) if distance_m.size > 0 else 0.0
+    if main_indices.size > 1:
+        included_distance_m = float(distance_m[main_indices[-1]] - distance_m[main_indices[0]])
+    else:
+        included_distance_m = total_distance_m
+
+    def zone_for_ffid(ffid_value: int) -> str:
+        if run_in_ffid is not None and ffid_value <= run_in_ffid:
+            return "run_in"
+        if run_out_ffid is not None and ffid_value >= run_out_ffid:
+            return "run_out"
+        return "main"
+
+    overall_stats = _numeric_summary(feathering)
+    main_stats = _numeric_summary(main_feathering)
+
+    limit_summary = None
+    overall_exceeded_count = 0
+    overall_exceeded_percent = 0.0
+    main_exceeded_count = 0
+    main_exceeded_percent = 0.0
+    max_abs = float(np.max(np.abs(main_feathering))) if main_feathering.size > 0 else 0.0
+
+    if feathering_limit > 0:
+        overall_exceeded_mask = np.abs(feathering) > feathering_limit
+        main_exceeded_mask = np.abs(main_feathering) > feathering_limit
+        overall_exceeded_count = int(np.sum(overall_exceeded_mask))
+        main_exceeded_count = int(np.sum(main_exceeded_mask))
+        overall_exceeded_percent = (
+            float(overall_exceeded_count / feathering.size * 100) if feathering.size > 0 else 0.0
+        )
+        main_exceeded_percent = (
+            float(main_exceeded_count / main_feathering.size * 100) if main_feathering.size > 0 else 0.0
+        )
+        limit_summary = {
+            "value": float(feathering_limit),
+            "overall_exceeded_count": overall_exceeded_count,
+            "overall_exceeded_percent": overall_exceeded_percent,
+            "main_exceeded_count": main_exceeded_count,
+            "main_exceeded_percent": main_exceeded_percent,
+            "max_abs": max_abs,
+        }
+
+    peaks = []
+    peak_order = np.argsort(np.abs(feathering[main_indices]))[::-1]
+    for index in peak_order[:5]:
+        original_idx = int(main_indices[index])
+        ffid_value = int(ffid_arr[original_idx])
+        peak_value = float(feathering[original_idx])
+        peaks.append({
+            "ffid": ffid_value,
+            "feathering": peak_value,
+            "abs_feathering": float(abs(peak_value)),
+            "zone": zone_for_ffid(ffid_value),
+            "exceeded": bool(feathering_limit > 0 and abs(peak_value) > feathering_limit),
+        })
+
+    changes = []
+    try:
+        for start_idx, end_idx, mean_shift, detection_type, peak_abs in analyzer.detect_feathering_changes(
+            main_feathering,
+            feathering_limit=feathering_limit,
+        )[:5]:
+            start_ffid = int(main_ffids[start_idx])
+            end_ffid = int(main_ffids[end_idx])
+            changes.append({
+                "start_ffid": start_ffid,
+                "end_ffid": end_ffid,
+                "detection_type": detection_type,
+                "peak_abs": float(peak_abs),
+                "mean_shift": float(mean_shift),
+                "record_count": int(end_idx - start_idx + 1),
+            })
+    except Exception:
+        changes = []
+
+    if feathering_limit <= 0:
+        verdict = "INFO"
+        headline = "No feathering limit was applied."
+        detail = (
+            f"Run-in/out 제외 후 {main_feathering.size:,} records를 main-line 기준으로 읽습니다. "
+            "이번 실행은 pass/fail보다 분포와 변화 패턴을 읽는 리뷰 모드입니다."
+        )
+    elif main_exceeded_count == 0:
+        verdict = "PASS"
+        headline = f"Main-line feathering stays within ±{feathering_limit:.1f}°."
+        detail = (
+            f"Run-in/out 제외 후 {main_feathering.size:,} records가 포함되었고, "
+            "main-line evidence window에서는 limit exceedance가 없습니다."
+        )
+    elif main_exceeded_percent <= 5.0:
+        verdict = "WARN"
+        headline = f"Localized exceedance detected above ±{feathering_limit:.1f}°."
+        detail = (
+            f"Main-line {main_exceeded_count:,} records ({main_exceeded_percent:.1f}%)가 "
+            "limit을 넘었습니다. breach 위치와 change zone을 함께 확인하세요."
+        )
+    else:
+        verdict = "FAIL"
+        headline = f"Feathering repeatedly exceeds ±{feathering_limit:.1f}°."
+        detail = (
+            f"Main-line {main_exceeded_count:,} records ({main_exceeded_percent:.1f}%)가 "
+            "limit을 넘어서, 공간적 cluster와 line 구간별 지속성을 확인해야 합니다."
+        )
+
+    if feathering_limit > 0 and main_exceeded_count > 0:
+        recommended_chart = "track"
+        recommended_reason = (
+            "초과 지점이 공간적으로 어디에 모이는지 Track Plot에서 먼저 확인하면 "
+            "회피 기동 또는 line tail pattern을 빠르게 읽을 수 있습니다."
+        )
+    elif changes:
+        recommended_chart = "feathering"
+        recommended_reason = (
+            "Change zone이 감지되어 FFID 기준 변동 패턴을 Feathering Plot에서 먼저 보는 것이 좋습니다."
+        )
+    else:
+        recommended_chart = "histogram"
+        recommended_reason = (
+            "Limit breach보다 전체 분포 shape를 보는 것이 중요하므로 Histogram에서 bias와 spread를 먼저 확인하세요."
+        )
+
+    return {
+        "verdict": verdict,
+        "headline": headline,
+        "detail": detail,
+        "recommended_chart": recommended_chart,
+        "recommended_reason": recommended_reason,
+        "matching": {
+            "mode": "fast" if fast_match else "precise",
+            "tolerance_s": float(tolerance_s) if tolerance_s is not None else None,
+            "npd_records": int(npd_records),
+            "track_records": int(track_records),
+            "matched_records": int(matched_records),
+            "matched_percent": float((matched_records / npd_records) * 100) if npd_records > 0 else 0.0,
+            "head_position": head_position,
+            "tail_position": tail_position,
+            "line_name": line_name,
+        },
+        "window": {
+            "total_records": int(feathering.size),
+            "included_records": int(main_feathering.size),
+            "excluded_records": int(feathering.size - main_feathering.size),
+            "first_ffid": int(ffid_arr[0]) if ffid_arr.size > 0 else None,
+            "last_ffid": int(ffid_arr[-1]) if ffid_arr.size > 0 else None,
+            "run_in_end_ffid": int(run_in_ffid) if run_in_ffid is not None else None,
+            "run_out_start_ffid": int(run_out_ffid) if run_out_ffid is not None else None,
+            "total_distance_m": total_distance_m,
+            "included_distance_m": included_distance_m,
+        },
+        "main_stats": main_stats,
+        "overall_stats": overall_stats,
+        "limit": limit_summary,
+        "peaks": peaks,
+        "changes": changes,
+    }
+
+
+PAIRING_STOPWORDS = {
+    "npd",
+    "track",
+    "tracking",
+    "trk",
+    "nav",
+    "navigation",
+    "line",
+    "raw",
+    "export",
+}
+
+
+def _path_tokens(path: str) -> list[str]:
+    stem = Path(path).stem.lower()
+    cleaned = re.sub(r"[^a-z0-9]+", " ", stem)
+    return [token for token in cleaned.split() if token and token not in PAIRING_STOPWORDS]
+
+
+def _suggest_line_name(npd_path: str, track_path: str | None = None) -> str:
+    preferred_path = track_path or npd_path
+    stem = Path(preferred_path).stem
+    stem = re.sub(r"(?i)_?track.*$", "", stem)
+    stem = re.sub(r"(?i)_?npd.*$", "", stem)
+    stem = stem.strip("._- ")
+    return stem or Path(preferred_path).stem or "Line"
+
+
+def _pair_score(npd_path: str, track_path: str) -> tuple[float, str]:
+    npd_tokens = set(_path_tokens(npd_path))
+    track_tokens = set(_path_tokens(track_path))
+    token_overlap = 0.0
+    if npd_tokens or track_tokens:
+        token_overlap = len(npd_tokens & track_tokens) / max(len(npd_tokens | track_tokens), 1)
+
+    name_ratio = SequenceMatcher(
+        None,
+        Path(npd_path).stem.lower(),
+        Path(track_path).stem.lower(),
+    ).ratio()
+    dir_ratio = SequenceMatcher(
+        None,
+        str(Path(npd_path).parent).lower(),
+        str(Path(track_path).parent).lower(),
+    ).ratio()
+    score = (name_ratio * 0.58) + (token_overlap * 0.32) + (dir_ratio * 0.10)
+    reason = f"name {name_ratio:.2f} / tokens {token_overlap:.2f} / dir {dir_ratio:.2f}"
+    return score, reason
+
+
+def _safe_path_component(value: str) -> str:
+    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._")
+    return sanitized or "line"
 
 
 def handle_run_analysis(params: dict) -> dict:
@@ -103,6 +371,9 @@ def handle_run_analysis(params: dict) -> dict:
         matched = analyzer.match_npd_with_track_fast(npd_df, track_df, tolerance_s=tolerance_s)
     else:
         matched = analyzer.match_npd_with_track(npd_df, track_df)
+
+    npd_records = len(npd_df)
+    track_records = len(track_df)
 
     if matched.empty:
         raise ValueError("매칭 결과가 비어있습니다. 시간 범위를 확인하세요.")
@@ -199,6 +470,23 @@ def handle_run_analysis(params: dict) -> dict:
         idx = int(np.searchsorted(distance_m, total_dist - run_out_m))
         run_out_ffid = int(ffid_arr[min(idx, len(ffid_arr) - 1)])
 
+    summary = _build_analysis_summary(
+        feathering,
+        ffid_arr,
+        distance_m,
+        npd_records=npd_records,
+        track_records=track_records,
+        matched_records=len(matched),
+        line_name=line_name,
+        fast_match=fast_match,
+        tolerance_s=tolerance_s,
+        head_position=head_position,
+        tail_position=tail_position,
+        feathering_limit=feathering_limit,
+        run_in_ffid=run_in_ffid,
+        run_out_ffid=run_out_ffid,
+    )
+
     return {
         "stats": {
             "mean": float(stats.get("mean", np.mean(feathering))),
@@ -212,6 +500,7 @@ def handle_run_analysis(params: dict) -> dict:
             "run_in_ffid": run_in_ffid,
             "run_out_ffid": run_out_ffid,
         },
+        "summary": summary,
         "chart_data": chart_data,
         "output_files": output_files,
     }
@@ -286,7 +575,7 @@ def handle_estimate_azimuth(params: dict) -> dict:
 
 
 def handle_scan_folder(params: dict) -> dict:
-    """폴더 내 NPD+Track 파일 쌍을 자동 탐지."""
+    """폴더 내 NPD+Track 파일 후보를 자동 탐지하고 배치 job을 제안."""
     folder = params["folder"]
     import glob
 
@@ -297,32 +586,86 @@ def handle_scan_folder(params: dict) -> dict:
     track_files += glob.glob(os.path.join(folder, "**", "*Track*"), recursive=True)
     track_files = [f for f in track_files if not f.endswith((".png", ".pdf"))]
 
+    npd_files = sorted(set(npd_files))
+    track_files = sorted(set(track_files))
+
+    jobs = []
+    for index, npd_path in enumerate(npd_files, start=1):
+        best_track = ""
+        best_score = 0.0
+        best_reason = "No suggested Track pair"
+
+        for track_path in track_files:
+            score, reason = _pair_score(npd_path, track_path)
+            if score > best_score:
+                best_score = score
+                best_track = track_path
+                best_reason = reason
+
+        suggested_track = best_track if best_score >= 0.28 else ""
+        confidence = int(round(best_score * 100))
+        jobs.append({
+            "id": f"job_{index}",
+            "line_name": _suggest_line_name(npd_path, suggested_track or None),
+            "npd_path": npd_path,
+            "track_path": suggested_track,
+            "confidence": confidence,
+            "match_reason": best_reason,
+            "selected": bool(suggested_track and confidence >= 50),
+        })
+
     return {
-        "npd_files": sorted(set(npd_files)),
-        "track_files": sorted(set(track_files)),
+        "npd_files": npd_files,
+        "track_files": track_files,
+        "jobs": jobs,
     }
 
 
 def handle_batch_analysis(params: dict) -> dict:
     """여러 라인을 순차 분석."""
     jobs = params["jobs"]  # list of {npd_path, track_path, ...}
+    output_dir = params.get("output_dir", "")
     results = []
+    batch_output_dir = ""
+
+    if output_dir:
+        batch_output_dir = os.path.join(
+            output_dir,
+            f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+        )
+        os.makedirs(batch_output_dir, exist_ok=True)
 
     for i, job in enumerate(jobs):
         progress("batch", f"배치 {i+1}/{len(jobs)}: {job.get('line_name', '...')}", int((i / len(jobs)) * 100))
         try:
-            result = handle_run_analysis(job)
+            run_job = dict(job)
+            line_name = run_job.get("line_name") or _suggest_line_name(run_job.get("npd_path", ""), run_job.get("track_path"))
+            if batch_output_dir:
+                run_output_dir = os.path.join(
+                    batch_output_dir,
+                    f"{i + 1:02d}_{_safe_path_component(line_name)}",
+                )
+                os.makedirs(run_output_dir, exist_ok=True)
+                run_job["output_dir"] = run_output_dir
+
+            result = handle_run_analysis(run_job)
             results.append({
-                "line_name": job.get("line_name", f"Job_{i+1}"),
+                "line_name": line_name,
                 "status": "success",
                 "stats": result["stats"],
+                "summary": result.get("summary"),
                 "output_files": result["output_files"],
+                "output_dir": run_job.get("output_dir", ""),
             })
         except Exception as e:
             results.append({
                 "line_name": job.get("line_name", f"Job_{i+1}"),
                 "status": "error",
                 "error": str(e),
+                "summary": None,
+                "stats": None,
+                "output_files": [],
+                "output_dir": "",
             })
 
     progress("done", f"배치 완료! {len(results)}개 라인 처리", 100)
@@ -332,6 +675,7 @@ def handle_batch_analysis(params: dict) -> dict:
         "total": len(results),
         "passed": passed,
         "failed": len(results) - passed,
+        "batch_output_dir": batch_output_dir,
         "results": results,
     }
 

@@ -10,17 +10,21 @@ import { OptionsPanel } from "@/components/panels/OptionsPanel";
 import { LogPanel } from "@/components/panels/LogPanel";
 import { ResultsPanel } from "@/components/panels/ResultsPanel";
 import { HelpPanel } from "@/components/panels/HelpPanel";
+import { WorkspacePanel } from "@/components/panels/WorkspacePanel";
 import { useEffect } from "react";
 
-function ActivePanel() {
+type AnalysisController = ReturnType<typeof useAnalysis>;
+
+function ActivePanel({ analysis }: { analysis: AnalysisController }) {
   const activePanel = useAppStore((s) => s.activePanel);
-  const analysis = useAnalysis();
 
   switch (activePanel) {
     case "input":
       return <InputPanel analysis={analysis} />;
     case "options":
       return <OptionsPanel analysis={analysis} />;
+    case "workspace":
+      return <WorkspacePanel analysis={analysis} />;
     case "log":
       return <LogPanel />;
     case "results":
@@ -50,18 +54,25 @@ export function AppShell() {
         e.preventDefault();
         saveSettings().then(() => toast.success("설정이 저장되었습니다."));
       }
+      if (e.ctrlKey && e.key === "b") {
+        e.preventDefault();
+        useAppStore.getState().setActivePanel("workspace");
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [analysis, isRunning, saveSettings]);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden">
+    <div className="flex h-screen w-screen overflow-hidden bg-background">
       <Sidebar />
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="relative flex flex-1 flex-col overflow-hidden">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(63,184,175,0.16),transparent_30%),radial-gradient(circle_at_bottom_left,rgba(124,138,255,0.14),transparent_32%)]" />
         <TopBar />
-        <main className="flex-1 overflow-auto p-4">
-          <ActivePanel />
+        <main className="relative flex-1 overflow-auto px-5 py-5">
+          <div className="mx-auto w-full max-w-[1500px]">
+            <ActivePanel analysis={analysis} />
+          </div>
         </main>
         <BottomBar onRun={analysis.runAnalysis} onOpenOutput={analysis.openOutputDir} />
       </div>

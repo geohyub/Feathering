@@ -5,38 +5,38 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: #0d1117;
+  --background: #08131c;
   --foreground: #e6edf3;
-  --card: #1c2333;
+  --card: #10202d;
   --card-foreground: #e6edf3;
-  --popover: #1c2333;
+  --popover: #10202d;
   --popover-foreground: #e6edf3;
-  --primary: #3fb8af;
-  --primary-foreground: #0d1117;
-  --secondary: #21262d;
+  --primary: #31b7aa;
+  --primary-foreground: #08131c;
+  --secondary: #142534;
   --secondary-foreground: #e6edf3;
-  --muted: #161b22;
-  --muted-foreground: #8b949e;
-  --accent: #21262d;
+  --muted: #0d1823;
+  --muted-foreground: #8da0ad;
+  --accent: #15293a;
   --accent-foreground: #e6edf3;
   --destructive: #f47067;
-  --border: #30363d;
-  --input: #30363d;
-  --ring: #3fb8af;
-  --chart-1: #7c8aff;
-  --chart-2: #66d9a0;
-  --chart-3: #ff6b6b;
-  --chart-4: #e8b94a;
-  --chart-5: #a78bfa;
+  --border: #274050;
+  --input: #1b3243;
+  --ring: #31b7aa;
+  --chart-1: #5b8cff;
+  --chart-2: #31b7aa;
+  --chart-3: #ff7b6b;
+  --chart-4: #f0c96a;
+  --chart-5: #8ea5ff;
   --radius: 0.5rem;
-  --sidebar: #131921;
-  --sidebar-foreground: #8b949e;
-  --sidebar-primary: #3fb8af;
-  --sidebar-primary-foreground: #0d1117;
-  --sidebar-accent: #1c2333;
+  --sidebar: #0c1722;
+  --sidebar-foreground: #8da0ad;
+  --sidebar-primary: #31b7aa;
+  --sidebar-primary-foreground: #08131c;
+  --sidebar-accent: #152536;
   --sidebar-accent-foreground: #e6edf3;
-  --sidebar-border: #30363d;
-  --sidebar-ring: #3fb8af;
+  --sidebar-border: #274050;
+  --sidebar-ring: #31b7aa;
 }
 
 @theme inline {
@@ -88,9 +88,18 @@
   }
   body {
     @apply bg-background text-foreground;
+    background-image:
+      radial-gradient(circle at top right, rgba(49, 183, 170, 0.08), transparent 24%),
+      radial-gradient(circle at bottom left, rgba(91, 140, 255, 0.1), transparent 28%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.01), rgba(255, 255, 255, 0));
+    min-height: 100vh;
+    color-scheme: dark;
   }
   html {
     @apply font-sans;
+  }
+  ::selection {
+    background: rgba(49, 183, 170, 0.22);
   }
 }
 

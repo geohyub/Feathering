@@ -8,6 +8,7 @@ import {
   Tooltip,
   Cell,
   ResponsiveContainer,
+  ReferenceLine,
 } from "recharts";
 import type { ChartDataPoint } from "@/types";
 
@@ -49,6 +50,14 @@ export function HistogramChart({ data, featheringLimit }: HistogramChartProps) {
 
     return result;
   }, [data, featheringLimit]);
+
+  const mean = useMemo(() => {
+    if (data.length === 0) {
+      return 0;
+    }
+
+    return data.reduce((sum, point) => sum + point.feathering, 0) / data.length;
+  }, [data]);
 
   return (
     <ResponsiveContainer width="100%" height={360}>
@@ -102,6 +111,43 @@ export function HistogramChart({ data, featheringLimit }: HistogramChartProps) {
             payload?.[0]?.payload?.bin || ""
           }
         />
+        <ReferenceLine
+          x={mean}
+          stroke="#66d9a0"
+          strokeDasharray="6 3"
+          label={{
+            value: `Mean ${mean.toFixed(1)}°`,
+            position: "insideTopRight",
+            fontSize: 10,
+            fill: "#66d9a0",
+          }}
+        />
+        {featheringLimit > 0 && (
+          <>
+            <ReferenceLine
+              x={featheringLimit}
+              stroke="#ff6b6b"
+              strokeDasharray="8 4"
+              label={{
+                value: `+${featheringLimit}°`,
+                position: "insideTopRight",
+                fontSize: 9,
+                fill: "#ff6b6b",
+              }}
+            />
+            <ReferenceLine
+              x={-featheringLimit}
+              stroke="#ff6b6b"
+              strokeDasharray="8 4"
+              label={{
+                value: `-${featheringLimit}°`,
+                position: "insideTopLeft",
+                fontSize: 9,
+                fill: "#ff6b6b",
+              }}
+            />
+          </>
+        )}
         <Bar dataKey="count" radius={[2, 2, 0, 0]}>
           {bins.map((entry, index) => (
             <Cell

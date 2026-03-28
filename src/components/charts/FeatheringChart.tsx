@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   ComposedChart,
   Area,
@@ -14,7 +14,7 @@ import {
 } from "recharts";
 import { Card } from "@/components/ui/card";
 import { lttbDecimate } from "@/lib/decimation";
-import type { ChartDataPoint, FeatheringStats } from "@/types";
+import type { AnalysisSummary, ChartDataPoint, FeatheringStats } from "@/types";
 
 interface FeatheringChartProps {
   data: ChartDataPoint[];
@@ -22,6 +22,7 @@ interface FeatheringChartProps {
   featheringLimit: number;
   runInM: number;
   runOutM: number;
+  summary?: AnalysisSummary | null;
 }
 
 const MAX_VISIBLE_POINTS = 2000;
@@ -32,9 +33,8 @@ export function FeatheringChart({
   featheringLimit,
   runInM,
   runOutM,
+  summary,
 }: FeatheringChartProps) {
-  const [brushRange, setBrushRange] = useState<[number, number] | null>(null);
-
   // Decimate data for rendering performance
   const chartData = useMemo(() => {
     const mapped = data.map((d) => ({
@@ -51,6 +51,8 @@ export function FeatheringChart({
   // Run-in/Run-out FFID boundaries (백엔드에서 거리 기반으로 계산된 값 사용)
   const runInEnd = stats.run_in_ffid;
   const runOutStart = stats.run_out_ffid;
+  const highlightedChanges = summary?.changes.slice(0, 3) ?? [];
+  const highlightedPeaks = summary?.peaks.slice(0, 3) ?? [];
 
   const minFFID = chartData.length > 0 ? chartData[0].ffid : 0;
   const maxFFID = chartData.length > 0 ? chartData[chartData.length - 1].ffid : 0;
@@ -70,6 +72,18 @@ export function FeatheringChart({
             {" ~ "}
             <span className="text-foreground">{stats.max.toFixed(2)}°</span>
           </div>
+          {summary && (
+            <div className="text-muted-foreground">
+              Main line:{" "}
+              <span className="text-foreground">
+                {summary.window.included_records.toLocaleString()}
+              </span>
+              {" / "}
+              <span className="text-foreground">
+                {summary.window.total_records.toLocaleString()}
+              </span>
+            </div>
+          )}
           <div className="text-muted-foreground">
             Total: <span className="text-foreground">{stats.total_records.toLocaleString()}</span> pts
           </div>
@@ -154,6 +168,22 @@ export function FeatheringChart({
             />
           )}
 
+          {highlightedChanges.map((change, index) => (
+            <ReferenceArea
+              key={`${change.start_ffid}-${change.end_ffid}-${index}`}
+              x1={change.start_ffid}
+              x2={change.end_ffid}
+              fill={change.detection_type === "Limit Exceeded" ? "#ff6b6b" : "#e8b94a"}
+              fillOpacity={0.08}
+              label={{
+                value: change.detection_type === "Limit Exceeded" ? "Limit zone" : "Change zone",
+                position: "insideTop",
+                fontSize: 10,
+                fill: change.detection_type === "Limit Exceeded" ? "#ff6b6b" : "#e8b94a",
+              }}
+            />
+          ))}
+
           {/* Zero line */}
           <ReferenceLine
             y={0}
@@ -206,6 +236,22 @@ export function FeatheringChart({
             </>
           )}
 
+          {highlightedPeaks.map((peak, index) => (
+            <ReferenceLine
+              key={`${peak.ffid}-${index}`}
+              x={peak.ffid}
+              stroke={peak.exceeded ? "#ff6b6b" : "#e8b94a"}
+              strokeDasharray="4 4"
+              strokeOpacity={0.65}
+              label={{
+                value: `Peak ${index + 1}`,
+                position: "top",
+                fontSize: 9,
+                fill: peak.exceeded ? "#ff6b6b" : "#e8b94a",
+              }}
+            />
+          ))}
+
           {/* Area fill */}
           <Area
             type="monotone"
@@ -236,11 +282,6 @@ export function FeatheringChart({
             stroke="var(--border)"
             fill="var(--muted)"
             travellerWidth={8}
-            onChange={(range) => {
-              if (range && "startIndex" in range) {
-                setBrushRange([range.startIndex ?? 0, range.endIndex ?? 0]);
-              }
-            }}
           >
             <ComposedChart>
               <Line
