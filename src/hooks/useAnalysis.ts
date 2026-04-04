@@ -4,6 +4,7 @@ import { openPath } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
 import { useAppStore } from "@/stores/appStore";
 import { useBackend } from "./useBackend";
+import { inspectTrackFile } from "@/lib/trackFormat";
 import type {
   AnalysisSnapshot,
   AzimuthEstimate,
@@ -44,6 +45,43 @@ function toOutputFile(path: string): OutputFile {
     name: getFileName(path),
     type: getFileType(path),
   };
+}
+
+async function validateTrackPath(path: string, announce = true) {
+  const state = useAppStore.getState();
+
+  if (!path) {
+    state.setTrackFormatState({
+      status: "idle",
+      message: "",
+      detail: "",
+    });
+    return false;
+  }
+
+  state.setTrackFormatState({
+    status: "checking",
+    message: "Track 형식을 확인하는 중입니다.",
+    detail: "탭으로 구분된 survey track인지 빠르게 검사하고 있습니다.",
+  });
+
+  const assessment = await inspectTrackFile(path);
+  state.setTrackFormatState(assessment);
+
+  if (assessment.status === "supported") {
+    if (announce) {
+      state.addLog(`Track 형식 확인: ${assessment.message}`, "success");
+    }
+    return true;
+  }
+
+  if (announce) {
+    state.addLog(`Track 형식 확인 실패: ${assessment.message}`, "warning");
+    toast.error(assessment.message, {
+      description: assessment.detail,
+    });
+  }
+  return false;
 }
 
 function toChartData(result: BackendResult): ChartData {
@@ -328,6 +366,8 @@ export function useAnalysis() {
 
       if (field === "npdPath") {
         await scanHeaders(result);
+      } else {
+        await validateTrackPath(result);
       }
     },
     [scanHeaders, store]
@@ -383,7 +423,17 @@ export function useAnalysis() {
     }
 
     if (!store.trackPath) {
-      toast.error("Track 파일을 선택하세요.");
+      toast.error("Track 파일을 선택하세요.", {
+        description: "Feathering은 탭으로 구분된 survey track 파일을 필요로 합니다.",
+      });
+      store.setActivePanel("input");
+      return;
+    }
+
+    if (!(await validateTrackPath(store.trackPath, false))) {
+      toast.error("Track 파일 형식이 맞지 않습니다.", {
+        description: useAppStore.getState().trackFormatDetail || "탭으로 구분된 survey track 파일을 사용해 주세요.",
+      });
       store.setActivePanel("input");
       return;
     }
@@ -434,7 +484,17 @@ export function useAnalysis() {
 
   const estimateAzimuth = useCallback(async () => {
     if (!store.trackPath) {
-      toast.error("Track 파일을 먼저 선택하세요.");
+      toast.error("Track 파일을 먼저 선택하세요.", {
+        description: "탭으로 구분된 survey track만 자동 추정에 사용할 수 있습니다.",
+      });
+      return;
+    }
+
+    if (!(await validateTrackPath(store.trackPath, false))) {
+      toast.error("Track 파일 형식이 맞지 않습니다.", {
+        description: useAppStore.getState().trackFormatDetail || "탭으로 구분된 survey track 파일을 사용해 주세요.",
+      });
+      store.setActivePanel("input");
       return;
     }
 
@@ -478,6 +538,18 @@ export function useAnalysis() {
       toast.error(`Track이 비어 있는 job이 있습니다: ${incompleteJob.lineName}`);
       state.setActivePanel("workspace");
       return;
+    }
+
+    for (const job of selectedJobs) {
+      const assessment = await inspectTrackFile(job.trackPath);
+      if (assessment.status !== "supported") {
+        toast.error(`지원되지 않는 Track 형식입니다: ${job.lineName}`, {
+          description: assessment.detail,
+        });
+        state.addLog(`배치 Track 형식 확인 실패: ${job.lineName}`, "warning");
+        state.setActivePanel("workspace");
+        return;
+      }
     }
 
     state.setRunning(true);
@@ -550,6 +622,7 @@ export function useAnalysis() {
     scanWorkspaceFolder,
     runAnalysis,
     estimateAzimuth,
+    validateTrackFile: (path: string) => validateTrackPath(path),
     runBatchAnalysis,
     openOutputDir,
     openFile,

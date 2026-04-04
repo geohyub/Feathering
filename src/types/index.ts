@@ -1,4 +1,5 @@
 export type PanelId = "input" | "options" | "workspace" | "log" | "results" | "help";
+export type TrackFormatStatus = "idle" | "checking" | "supported" | "unsupported";
 
 export type LogLevel = "info" | "success" | "error" | "warning";
 export type ChartTabId = "feathering" | "track" | "histogram";
@@ -162,6 +163,12 @@ export interface RunSettingsSnapshot {
   matchTolerance: string;
   headPosition: string;
   tailPosition: string;
+}
+
+export interface TrackFormatState {
+  status: TrackFormatStatus;
+  message: string;
+  detail: string;
 }
 
 export interface AnalysisSnapshot {

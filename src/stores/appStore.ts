@@ -13,6 +13,7 @@ import type {
   BatchJobOutcome,
   BatchWorkspaceJob,
   BatchWorkspaceScan,
+  TrackFormatState,
 } from "@/types";
 
 let logCounter = 0;
@@ -41,12 +42,16 @@ interface AppState {
   // Input fields
   npdPath: string;
   trackPath: string;
+  trackFormatStatus: TrackFormatState["status"];
+  trackFormatMessage: string;
+  trackFormatDetail: string;
   lineName: string;
   plannedAzimuth: string;
   featheringLimit: string;
   runInM: string;
   runOutM: string;
   setField: (key: string, value: string) => void;
+  setTrackFormatState: (state: TrackFormatState) => void;
 
   // NPD headers
   npdHeaders: string[];
@@ -143,6 +148,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Input fields
   npdPath: "",
   trackPath: "",
+  trackFormatStatus: "idle",
+  trackFormatMessage: "",
+  trackFormatDetail: "",
   lineName: "",
   plannedAzimuth: "",
   featheringLimit: "0",
@@ -162,6 +170,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       if (key === "trackPath" && changed) {
         next.azimuthEstimate = null;
+        next.trackFormatStatus = "idle";
+        next.trackFormatMessage = "";
+        next.trackFormatDetail = "";
       }
 
       if (RESULT_INVALIDATION_FIELDS.has(key) && shouldInvalidateResults(state, changed)) {
@@ -170,6 +181,12 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       return next;
+  }),
+  setTrackFormatState: (state) =>
+    set({
+      trackFormatStatus: state.status,
+      trackFormatMessage: state.message,
+      trackFormatDetail: state.detail,
     }),
 
   // NPD headers
@@ -334,6 +351,9 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({
       npdPath: s.npd_path || "",
       trackPath: s.track_path || "",
+      trackFormatStatus: "idle",
+      trackFormatMessage: "",
+      trackFormatDetail: "",
       outputDir: s.output_dir || "",
       lineName: s.line_name || "",
       plannedAzimuth: s.planned_azimuth || "",

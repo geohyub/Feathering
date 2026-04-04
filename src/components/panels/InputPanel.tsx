@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  AlertTriangle,
   ArrowRight,
   ArrowRightLeft,
   CheckCircle2,
@@ -39,6 +40,7 @@ interface InputPanelProps {
     scanHeaders: (path: string) => Promise<void>;
     estimateAzimuth: () => Promise<void>;
     runAnalysis: () => Promise<void>;
+    validateTrackFile: (path: string) => Promise<boolean>;
   };
 }
 
@@ -105,6 +107,9 @@ export function InputPanel({ analysis }: InputPanelProps) {
     npdHeaders,
     headPosition,
     tailPosition,
+    trackFormatStatus,
+    trackFormatMessage,
+    trackFormatDetail,
     fastMatch,
     matchTolerance,
     outputDir,
@@ -134,14 +139,19 @@ export function InputPanel({ analysis }: InputPanelProps) {
     Math.abs(Number(plannedAzimuth) - recommendedAzimuth) < 0.05;
 
   const filesReady = Boolean(npdPath && trackPath);
+  const trackFormatReady = !trackPath || trackFormatStatus !== "unsupported";
   const headersReady =
     npdHeaders.length === 0 ||
     (Boolean(headPosition) && Boolean(tailPosition) && headPosition !== tailPosition);
   const azimuthReady = Boolean(plannedAzimuth);
-  const runReady = filesReady && headersReady && azimuthReady;
+  const runReady = filesReady && headersReady && azimuthReady && trackFormatReady;
 
   const nextAction = !filesReady
     ? "NPD와 Track 파일을 모두 연결하면 헤더 스캔과 방향 설정으로 넘어갑니다."
+    : trackFormatStatus === "unsupported"
+      ? "Track 입력이 원시 GPGGA/NMEA 로그처럼 보입니다. 탭으로 구분된 survey track으로 변환한 뒤 다시 연결하세요."
+      : trackFormatStatus === "checking"
+        ? "Track 파일 형식을 확인하는 중입니다. 잠시만 기다려 주세요."
     : !headersReady
       ? "Head / Tail 헤더가 서로 다르게 선택되어야 실제 streamer 방향이 계산됩니다."
       : !azimuthReady
@@ -194,6 +204,8 @@ export function InputPanel({ analysis }: InputPanelProps) {
     setField(field, path);
     if (field === "npdPath") {
       void analysis.scanHeaders(path);
+    } else {
+      void analysis.validateTrackFile(path);
     }
   };
 
@@ -308,6 +320,12 @@ export function InputPanel({ analysis }: InputPanelProps) {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="rounded-2xl border border-border/70 bg-background/45 px-4 py-3 text-xs leading-5 text-muted-foreground">
+                지원되는 Track은 <span className="font-medium text-foreground">tab-separated survey track</span>입니다.
+                <br />
+                <span className="text-foreground">raw GPGGA / NMEA nav 로그는 직접 사용할 수 없습니다.</span>
+              </div>
+
               <FileDropZone onFileDrop={handleFileDrop("npdPath")}>
                 <div className="space-y-2 rounded-2xl border border-border/70 bg-background/40 p-3">
                   <div className="flex items-center justify-between gap-2">
@@ -347,18 +365,49 @@ export function InputPanel({ analysis }: InputPanelProps) {
                     <Label htmlFor="track" className="text-xs text-muted-foreground">
                       Track file
                     </Label>
-                    {trackPath && (
-                      <Badge variant="outline" className="border-success/30 bg-success/10 text-success">
-                        Connected
-                      </Badge>
-                    )}
+                    {trackPath ? (
+                      trackFormatStatus === "supported" ? (
+                        <Badge
+                          variant="outline"
+                          className="border-success/30 bg-success/10 text-success"
+                        >
+                          형식 확인됨
+                        </Badge>
+                      ) : trackFormatStatus === "unsupported" ? (
+                        <Badge
+                          variant="outline"
+                          className="border-warning/30 bg-warning/10 text-warning"
+                        >
+                          형식 확인 필요
+                        </Badge>
+                      ) : trackFormatStatus === "checking" ? (
+                        <Badge
+                          variant="outline"
+                          className="border-border/70 bg-muted/40 text-muted-foreground"
+                        >
+                          확인 중
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant="outline"
+                          className="border-border/70 bg-muted/40 text-muted-foreground"
+                        >
+                          형식 확인 필요
+                        </Badge>
+                      )
+                    ) : null}
                   </div>
                   <div className="flex gap-2">
                     <Input
                       id="track"
                       value={trackPath}
                       onChange={(event) => setField("trackPath", event.target.value)}
-                      placeholder="Track 파일을 드래그하거나 선택하세요"
+                      onBlur={() => {
+                        if (trackPath) {
+                          void analysis.validateTrackFile(trackPath);
+                        }
+                      }}
+                      placeholder="탭 구분 survey track 파일을 드래그하거나 선택하세요"
                       className="h-9 text-xs font-mono"
                     />
                     <Button variant="outline" size="sm" className="h-9 shrink-0" onClick={() => void handleBrowse("trackPath")}>
@@ -366,6 +415,29 @@ export function InputPanel({ analysis }: InputPanelProps) {
                       선택
                     </Button>
                   </div>
+                  {trackPath ? (
+                    <div
+                      className={
+                        trackFormatStatus === "supported"
+                          ? "rounded-xl border border-success/20 bg-success/5 px-3 py-2 text-[11px] leading-5 text-success"
+                          : trackFormatStatus === "unsupported"
+                            ? "rounded-xl border border-warning/25 bg-warning/10 px-3 py-2 text-[11px] leading-5 text-warning"
+                            : "rounded-xl border border-border/60 bg-muted/30 px-3 py-2 text-[11px] leading-5 text-muted-foreground"
+                      }
+                    >
+                      <div className="flex items-start gap-2">
+                        {trackFormatStatus === "unsupported" ? (
+                          <AlertTriangle size={12} className="mt-0.5 shrink-0" />
+                        ) : null}
+                        <div>
+                          <div className="font-medium text-foreground">
+                            {trackFormatMessage || "Track 형식을 확인하세요."}
+                          </div>
+                          <div className="mt-0.5">{trackFormatDetail}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </FileDropZone>
 
