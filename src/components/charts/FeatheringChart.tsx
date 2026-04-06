@@ -38,7 +38,8 @@ export function FeatheringChart({
   // Decimate data for rendering performance
   const chartData = useMemo(() => {
     const mapped = data.map((d) => ({
-      x: d.ffid,
+      x: d.trace_no,
+      traceNo: d.trace_no,
       y: d.feathering,
       ffid: d.ffid,
       feathering: d.feathering,
@@ -48,14 +49,21 @@ export function FeatheringChart({
     return lttbDecimate(mapped, MAX_VISIBLE_POINTS);
   }, [data]);
 
+  const traceNoByFfid = useMemo(
+    () => new Map(data.map((point) => [point.ffid, point.trace_no])),
+    [data]
+  );
+
   // Run-in/Run-out FFID boundaries (백엔드에서 거리 기반으로 계산된 값 사용)
   const runInEnd = stats.run_in_ffid;
   const runOutStart = stats.run_out_ffid;
   const highlightedChanges = summary?.changes.slice(0, 3) ?? [];
   const highlightedPeaks = summary?.peaks.slice(0, 3) ?? [];
 
-  const minFFID = chartData.length > 0 ? chartData[0].ffid : 0;
-  const maxFFID = chartData.length > 0 ? chartData[chartData.length - 1].ffid : 0;
+  const minTraceNo = chartData.length > 0 ? chartData[0].x : 0;
+  const maxTraceNo = chartData.length > 0 ? chartData[chartData.length - 1].x : 0;
+  const lineColor = "#0f766e";
+  const fillColor = "#14b8a6";
 
   return (
     <div className="relative">
@@ -97,8 +105,8 @@ export function FeatheringChart({
         >
           <defs>
             <linearGradient id="featheringFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#7c8aff" stopOpacity={0.15} />
-              <stop offset="95%" stopColor="#7c8aff" stopOpacity={0.02} />
+              <stop offset="5%" stopColor={fillColor} stopOpacity={0.12} />
+              <stop offset="95%" stopColor={fillColor} stopOpacity={0.02} />
             </linearGradient>
           </defs>
 
@@ -109,10 +117,17 @@ export function FeatheringChart({
           />
 
           <XAxis
-            dataKey="ffid"
+            dataKey="x"
             stroke="var(--muted-foreground)"
             fontSize={10}
             tickFormatter={(v: number) => v.toLocaleString()}
+            label={{
+              value: "Trace No",
+              position: "insideBottom",
+              offset: -2,
+              fill: "var(--muted-foreground)",
+              fontSize: 11,
+            }}
           />
           <YAxis
             stroke="var(--muted-foreground)"
@@ -133,21 +148,21 @@ export function FeatheringChart({
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             formatter={(value: any) => [`${Number(value).toFixed(3)}°`, "Feathering"]}
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            labelFormatter={(label: any) => `FFID: ${Number(label).toLocaleString()}`}
+            labelFormatter={(label: any) => `Trace No: ${Number(label).toLocaleString()}`}
           />
 
           {/* Run-in zone */}
           {runInEnd && (
             <ReferenceArea
-              x1={minFFID}
-              x2={runInEnd}
-              fill="#e8b94a"
-              fillOpacity={0.08}
+              x1={minTraceNo}
+              x2={traceNoByFfid.get(runInEnd) ?? runInEnd}
+              fill="#f59e0b"
+              fillOpacity={0.06}
               label={{
                 value: "Run-in",
                 position: "insideTopLeft",
                 fontSize: 10,
-                fill: "#e8b94a",
+                fill: "#f59e0b",
               }}
             />
           )}
@@ -155,15 +170,15 @@ export function FeatheringChart({
           {/* Run-out zone */}
           {runOutStart && (
             <ReferenceArea
-              x1={runOutStart}
-              x2={maxFFID}
-              fill="#e8b94a"
-              fillOpacity={0.08}
+              x1={traceNoByFfid.get(runOutStart) ?? runOutStart}
+              x2={maxTraceNo}
+              fill="#f59e0b"
+              fillOpacity={0.06}
               label={{
                 value: "Run-out",
                 position: "insideTopRight",
                 fontSize: 10,
-                fill: "#e8b94a",
+                fill: "#f59e0b",
               }}
             />
           )}
@@ -171,15 +186,15 @@ export function FeatheringChart({
           {highlightedChanges.map((change, index) => (
             <ReferenceArea
               key={`${change.start_ffid}-${change.end_ffid}-${index}`}
-              x1={change.start_ffid}
-              x2={change.end_ffid}
-              fill={change.detection_type === "Limit Exceeded" ? "#ff6b6b" : "#e8b94a"}
+              x1={traceNoByFfid.get(change.start_ffid) ?? change.start_ffid}
+              x2={traceNoByFfid.get(change.end_ffid) ?? change.end_ffid}
+              fill={change.detection_type === "Limit Exceeded" ? "#ef4444" : "#f59e0b"}
               fillOpacity={0.08}
               label={{
                 value: change.detection_type === "Limit Exceeded" ? "Limit zone" : "Change zone",
                 position: "insideTop",
                 fontSize: 10,
-                fill: change.detection_type === "Limit Exceeded" ? "#ff6b6b" : "#e8b94a",
+                fill: change.detection_type === "Limit Exceeded" ? "#ef4444" : "#f59e0b",
               }}
             />
           ))}
@@ -195,14 +210,14 @@ export function FeatheringChart({
           {/* Mean line */}
           <ReferenceLine
             y={stats.mean}
-            stroke="#66d9a0"
+            stroke="#f59e0b"
             strokeDasharray="6 3"
             strokeWidth={1}
             label={{
               value: `Mean: ${stats.mean.toFixed(2)}°`,
               position: "right",
               fontSize: 10,
-              fill: "#66d9a0",
+              fill: "#f59e0b",
             }}
           />
 
@@ -211,26 +226,26 @@ export function FeatheringChart({
             <>
               <ReferenceLine
                 y={featheringLimit}
-                stroke="#ff6b6b"
+                stroke="#fb7185"
                 strokeDasharray="8 4"
                 strokeWidth={1}
                 label={{
                   value: `+${featheringLimit}°`,
                   position: "right",
                   fontSize: 9,
-                  fill: "#ff6b6b",
+                  fill: "#fb7185",
                 }}
               />
               <ReferenceLine
                 y={-featheringLimit}
-                stroke="#ff6b6b"
+                stroke="#fb7185"
                 strokeDasharray="8 4"
                 strokeWidth={1}
                 label={{
                   value: `-${featheringLimit}°`,
                   position: "right",
                   fontSize: 9,
-                  fill: "#ff6b6b",
+                  fill: "#fb7185",
                 }}
               />
             </>
@@ -239,15 +254,15 @@ export function FeatheringChart({
           {highlightedPeaks.map((peak, index) => (
             <ReferenceLine
               key={`${peak.ffid}-${index}`}
-              x={peak.ffid}
-              stroke={peak.exceeded ? "#ff6b6b" : "#e8b94a"}
+              x={traceNoByFfid.get(peak.ffid) ?? peak.ffid}
+              stroke={peak.exceeded ? "#ef4444" : "#f59e0b"}
               strokeDasharray="4 4"
               strokeOpacity={0.65}
               label={{
                 value: `Peak ${index + 1}`,
                 position: "top",
                 fontSize: 9,
-                fill: peak.exceeded ? "#ff6b6b" : "#e8b94a",
+                fill: peak.exceeded ? "#ef4444" : "#f59e0b",
               }}
             />
           ))}
@@ -262,14 +277,15 @@ export function FeatheringChart({
 
           {/* Main feathering line */}
           <Line
-            type="monotone"
+            type="linear"
             dataKey="feathering"
-            stroke="#7c8aff"
-            strokeWidth={1.2}
+            stroke={lineColor}
+            strokeWidth={1.6}
             dot={false}
+            isAnimationActive={false}
             activeDot={{
               r: 3,
-              fill: "#7c8aff",
+              fill: lineColor,
               stroke: "var(--background)",
               strokeWidth: 1,
             }}
@@ -277,7 +293,7 @@ export function FeatheringChart({
 
           {/* Brush for range selection */}
           <Brush
-            dataKey="ffid"
+            dataKey="x"
             height={24}
             stroke="var(--border)"
             fill="var(--muted)"
@@ -285,11 +301,12 @@ export function FeatheringChart({
           >
             <ComposedChart>
               <Line
-                type="monotone"
+                type="linear"
                 dataKey="feathering"
-                stroke="#7c8aff"
+                stroke={lineColor}
                 strokeWidth={0.5}
                 dot={false}
+                isAnimationActive={false}
               />
             </ComposedChart>
           </Brush>

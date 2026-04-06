@@ -41,6 +41,7 @@ export interface NumericSummary {
 
 export interface ChartDataPoint {
   ffid: number;
+  trace_no: number;
   feathering: number;
   sou_x: number;
   sou_y: number;
@@ -221,6 +222,7 @@ export interface BackendResult {
   summary: AnalysisSummary;
   chart_data: {
     ffid: number[];
+    trace_no: number[];
     feathering: number[];
     sou_x: number[];
     sou_y: number[];
@@ -230,6 +232,7 @@ export interface BackendResult {
     tail_y: number[];
   };
   output_files: string[];
+  output_dir?: string;
 }
 
 export interface BackendMessage {

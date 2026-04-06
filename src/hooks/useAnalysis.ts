@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { openPath } from "@tauri-apps/plugin-opener";
+import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { toast } from "sonner";
 import { useAppStore } from "@/stores/appStore";
 import { useBackend } from "./useBackend";
@@ -88,13 +88,14 @@ function toChartData(result: BackendResult): ChartData {
   return {
     points: result.chart_data.ffid.map((_, index) => ({
       ffid: result.chart_data.ffid[index],
+      trace_no: result.chart_data.trace_no[index] ?? result.chart_data.ffid[index],
       feathering: result.chart_data.feathering[index],
-      sou_x: result.chart_data.sou_x[index] || 0,
-      sou_y: result.chart_data.sou_y[index] || 0,
-      front_x: result.chart_data.front_x[index] || 0,
-      front_y: result.chart_data.front_y[index] || 0,
-      tail_x: result.chart_data.tail_x[index] || 0,
-      tail_y: result.chart_data.tail_y[index] || 0,
+      sou_x: result.chart_data.sou_x[index] ?? 0,
+      sou_y: result.chart_data.sou_y[index] ?? 0,
+      front_x: result.chart_data.front_x[index] ?? 0,
+      front_y: result.chart_data.front_y[index] ?? 0,
+      tail_x: result.chart_data.tail_x[index] ?? 0,
+      tail_y: result.chart_data.tail_y[index] ?? 0,
     })),
   };
 }
@@ -144,6 +145,17 @@ function buildAnalysisSnapshot(
   };
 }
 
+function getResultOutputDir(result: BackendResult): string {
+  if (result.output_dir) {
+    return result.output_dir;
+  }
+  const first = result.output_files[0];
+  if (!first) {
+    return "";
+  }
+  return first.replace(/[\\/][^\\/]+$/, "");
+}
+
 export function useAnalysis() {
   const store = useAppStore();
 
@@ -177,10 +189,31 @@ export function useAnalysis() {
 
       if ("headers" in result) {
         const headers = result.headers as string[];
+        const suggestedHead =
+          typeof result.default_head_position === "string"
+            ? result.default_head_position
+            : typeof result.suggested_head_position === "string"
+            ? result.suggested_head_position
+            : undefined;
+        const suggestedTail =
+          typeof result.default_tail_position === "string"
+            ? result.default_tail_position
+            : typeof result.suggested_tail_position === "string"
+            ? result.suggested_tail_position
+            : undefined;
         state.setNpdHeaders(headers);
-        if (headers.length >= 2) {
-          const headMatch = headers.find((header) => /head|front/i.test(header));
-          const tailMatch = headers.find((header) => /tail|rear|end/i.test(header));
+        if (suggestedHead) {
+          state.setHeadPosition(suggestedHead);
+        }
+        if (suggestedTail && suggestedTail !== suggestedHead) {
+          state.setTailPosition(suggestedTail);
+        }
+        if (headers.length >= 2 && (!suggestedHead || !suggestedTail)) {
+          const headMatch = headers.find((header) => /head|front/i.test(header)) || headers[0];
+          const tailMatch =
+            headers.find((header) => /tail|rear|end/i.test(header) && header !== headMatch) ||
+            headers.find((header) => header !== headMatch) ||
+            headers[1];
           if (headMatch) state.setHeadPosition(headMatch);
           if (tailMatch) state.setTailPosition(tailMatch);
         }
@@ -295,7 +328,7 @@ export function useAnalysis() {
         toast.success(`배치 완료: ${batchResult.passed}/${batchResult.total}`);
 
         if (state.openAfterRun && batchResult.batch_output_dir) {
-          openPath(batchResult.batch_output_dir).catch(() => undefined);
+          revealItemInDir(batchResult.batch_output_dir).catch(() => undefined);
         }
         return;
       }
@@ -305,11 +338,15 @@ export function useAnalysis() {
         const chartData = toChartData(res);
         const resultFiles = res.output_files.map(toOutputFile);
         const snapshot = buildAnalysisSnapshot(state, res, chartData);
+        const resultOutputDir = getResultOutputDir(res);
 
         state.setStats(res.stats);
         state.setSummary(res.summary);
         state.setResultsStale(false);
         state.setChartData(chartData);
+        if (resultOutputDir) {
+          state.setOutputDir(resultOutputDir);
+        }
         state.addAnalysisSnapshot(snapshot);
 
         for (const file of resultFiles) {
@@ -324,8 +361,8 @@ export function useAnalysis() {
           `분석 완료 — Mean: ${res.stats.mean.toFixed(2)}°, Records: ${res.stats.total_records.toLocaleString()}`
         );
 
-        if (state.openAfterRun && state.outputDir) {
-          openPath(state.outputDir).catch(() => undefined);
+        if (state.openAfterRun && resultOutputDir) {
+          revealItemInDir(resultOutputDir).catch(() => undefined);
         }
         return;
       }
@@ -595,22 +632,30 @@ export function useAnalysis() {
   }, [send]);
 
   const openOutputDir = useCallback(async () => {
-    if (!store.outputDir) {
+    const state = useAppStore.getState();
+    const fallbackDir =
+      state.resultFiles[0]?.path.replace(/[\\/][^\\/]+$/, "") || "";
+    const targetDir = state.outputDir || fallbackDir;
+    if (!targetDir) {
       return;
     }
 
     try {
-      await openPath(store.outputDir);
+      await revealItemInDir(targetDir);
     } catch {
       toast.error("출력 폴더를 열 수 없습니다.");
     }
-  }, [store.outputDir]);
+  }, []);
 
   const openFile = useCallback(async (path: string) => {
     try {
       await openPath(path);
     } catch {
-      toast.error("파일을 열 수 없습니다.");
+      try {
+        await revealItemInDir(path);
+      } catch {
+        toast.error("파일을 열 수 없습니다.");
+      }
     }
   }, []);
 

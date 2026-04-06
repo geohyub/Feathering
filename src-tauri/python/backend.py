@@ -50,10 +50,37 @@ def handle_ping(_params: dict) -> dict:
     return {"pong": True, "version": "3.0.0"}
 
 
+def _suggest_header_positions(headers: list[str]) -> tuple[str | None, str | None]:
+    """Suggest sensible head/tail defaults from scanned NPD headers."""
+    if not headers:
+        return None, None
+
+    exact_head = next((header for header in headers if header == "Head_Buoy"), None)
+    exact_tail = next((header for header in headers if header == "Tail_Buoy"), None)
+    if exact_head and exact_tail and exact_head != exact_tail:
+        return exact_head, exact_tail
+
+    head_match = next((header for header in headers if re.search(r"head|front", header, re.I)), None)
+    tail_match = next((header for header in headers if re.search(r"tail|rear|end", header, re.I)), None)
+    if head_match and tail_match and head_match != tail_match:
+        return head_match, tail_match
+
+    if len(headers) >= 2:
+        return headers[0], headers[1]
+    return headers[0], None
+
+
 def handle_scan_headers(params: dict) -> dict:
     path = params["path"]
     headers = analyzer.scan_npd_headers(path)
-    return {"headers": headers}
+    suggested_head, suggested_tail = _suggest_header_positions(headers)
+    return {
+        "headers": headers,
+        "default_head_position": suggested_head,
+        "default_tail_position": suggested_tail,
+        "suggested_head_position": suggested_head,
+        "suggested_tail_position": suggested_tail,
+    }
 
 
 def _numeric_summary(values: np.ndarray) -> dict:
@@ -345,9 +372,10 @@ def handle_run_analysis(params: dict) -> dict:
 
     # Output dir 생성
     if output_dir:
-        os.makedirs(output_dir, exist_ok=True)
+        output_dir = str(Path(output_dir).expanduser().resolve())
     else:
-        output_dir = str(Path(track_path).parent)
+        output_dir = str(Path(track_path).expanduser().resolve().parent)
+    os.makedirs(output_dir, exist_ok=True)
 
     target_positions = [head_position, tail_position]
 
@@ -431,6 +459,9 @@ def handle_run_analysis(params: dict) -> dict:
 
     chart_data = {
         "ffid": matched["FFID"].tolist() if "FFID" in matched.columns else list(range(len(matched))),
+        "trace_no": matched["TRACENO"].tolist() if "TRACENO" in matched.columns else (
+            matched["FFID"].tolist() if "FFID" in matched.columns else list(range(len(matched)))
+        ),
         "feathering": feathering.tolist(),
         "sou_x": matched["SOU_X"].tolist() if "SOU_X" in matched.columns else [],
         "sou_y": matched["SOU_Y"].tolist() if "SOU_Y" in matched.columns else [],
@@ -503,6 +534,7 @@ def handle_run_analysis(params: dict) -> dict:
         "summary": summary,
         "chart_data": chart_data,
         "output_files": output_files,
+        "output_dir": output_dir,
     }
 
 
@@ -630,7 +662,7 @@ def handle_batch_analysis(params: dict) -> dict:
 
     if output_dir:
         batch_output_dir = os.path.join(
-            output_dir,
+            str(Path(output_dir).expanduser().resolve()),
             f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
         )
         os.makedirs(batch_output_dir, exist_ok=True)
@@ -642,7 +674,7 @@ def handle_batch_analysis(params: dict) -> dict:
             line_name = run_job.get("line_name") or _suggest_line_name(run_job.get("npd_path", ""), run_job.get("track_path"))
             if batch_output_dir:
                 run_output_dir = os.path.join(
-                    batch_output_dir,
+                    str(Path(batch_output_dir).expanduser().resolve()),
                     f"{i + 1:02d}_{_safe_path_component(line_name)}",
                 )
                 os.makedirs(run_output_dir, exist_ok=True)

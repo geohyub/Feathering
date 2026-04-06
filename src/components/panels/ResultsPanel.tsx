@@ -107,17 +107,13 @@ export function ResultsPanel({ analysis }: ResultsPanelProps) {
   if (!stats && !summary && resultFiles.length === 0) {
     return (
       <Card className="border-dashed border-border/70 bg-background/35">
-        <CardContent className="flex min-h-[320px] flex-col items-center justify-center px-6 py-12 text-center">
+        <CardContent className="flex min-h-[280px] flex-col items-center justify-center px-6 py-10 text-center">
           <Badge variant="outline" className="border-primary/25 bg-primary/10 text-primary">
-            No result yet
+            No results
           </Badge>
-          <h2 className="mt-5 text-2xl font-semibold tracking-tight text-foreground">
-            분석을 실행하면 판단 스토리와 차트가 여기에 정리됩니다.
+          <h2 className="mt-4 text-xl font-semibold text-foreground">
+            Run analysis to view results
           </h2>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-            결과 화면은 단순히 파일 목록을 보여주는 곳이 아니라, 어떤 구간이 main line인지,
-            limit breach가 어디서 생겼는지, 어떤 chart부터 봐야 하는지를 연결해서 설명합니다.
-          </p>
         </CardContent>
       </Card>
     );
@@ -279,10 +275,9 @@ export function ResultsPanel({ analysis }: ResultsPanelProps) {
                   </Badge>
                 ))}
               </div>
-              <div className="rounded-2xl border border-border/70 bg-background/35 p-4 text-sm leading-6 text-muted-foreground">
-                결과 package는 chart 이미지, raw CSV, text report, PDF report를 함께 유지합니다.
-                화면 해석이 납품 파일과 어긋나지 않도록 같은 output folder를 기준으로 묶어 보여줍니다.
-              </div>
+              <p className="text-xs text-muted-foreground">
+                Chart, CSV, Report, PDF가 같은 출력 폴더에 저장됩니다.
+              </p>
               <Button variant="outline" className="w-full" onClick={() => void analysis.openOutputDir()}>
                 출력 폴더 열기
               </Button>
@@ -473,8 +468,8 @@ export function ResultsPanel({ analysis }: ResultsPanelProps) {
         </CardHeader>
         <CardContent>
           {resultFiles.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              분석 완료 후 결과 파일이 여기에 표시됩니다.
+            <p className="py-4 text-center text-xs text-muted-foreground">
+              분석 완료 후 파일 목록이 표시됩니다.
             </p>
           ) : (
             <ScrollArea className="max-h-[260px]">

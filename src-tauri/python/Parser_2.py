@@ -940,8 +940,11 @@ def plot_feathering(df, feathering, planned_azimuth, run_in_m, run_out_m,
     """Feathering 그래프 생성 — professional dark theme"""
 
     ffid = df['FFID'].values
+    trace_no = df['TRACENO'].values if 'TRACENO' in df.columns else ffid
     first_ffid = ffid[0]
     last_ffid = ffid[-1]
+    first_trace = trace_no[0]
+    last_trace = trace_no[-1]
 
     distance_m = calculate_distance_along_line(df) * 1000.0
     total_distance = distance_m[-1]
@@ -949,15 +952,19 @@ def plot_feathering(df, feathering, planned_azimuth, run_in_m, run_out_m,
     if run_in_m > 0:
         run_in_idx = np.searchsorted(distance_m, run_in_m)
         run_in_ffid = ffid[run_in_idx] if run_in_idx < len(ffid) else first_ffid
+        run_in_trace = trace_no[run_in_idx] if run_in_idx < len(trace_no) else first_trace
     else:
         run_in_ffid = first_ffid
+        run_in_trace = first_trace
 
     if run_out_m > 0:
         run_out_distance = total_distance - run_out_m
         run_out_idx = np.searchsorted(distance_m, run_out_distance)
         run_out_ffid = ffid[run_out_idx] if run_out_idx < len(ffid) else last_ffid
+        run_out_trace = trace_no[run_out_idx] if run_out_idx < len(trace_no) else last_trace
     else:
         run_out_ffid = last_ffid
+        run_out_trace = last_trace
 
     main_line_mask = (ffid >= run_in_ffid) & (ffid <= run_out_ffid)
     main_feathering = feathering[main_line_mask]
@@ -969,25 +976,37 @@ def plot_feathering(df, feathering, planned_azimuth, run_in_m, run_out_m,
 
     # --- Figure ---
     fig, ax = plt.subplots(figsize=(20, 7))
+    plot_color = "#14b8a6"
+    fill_color = "#0f766e"
+    mean_color = "#f59e0b"
 
     # Run-in / Run-out zones
     if run_in_m > 0:
-        ax.axvspan(first_ffid, run_in_ffid, alpha=0.18,
+        ax.axvspan(first_trace, run_in_trace, alpha=0.18,
                    color=_PLOT_STYLE["green_zone"], label='Run-in (SoL)')
     if run_out_m > 0:
-        ax.axvspan(run_out_ffid, last_ffid, alpha=0.18,
+        ax.axvspan(run_out_trace, last_trace, alpha=0.18,
                    color=_PLOT_STYLE["red_zone"], label='Run-out (EoL)')
 
-    # Feathering line with gradient-like effect
-    ax.fill_between(ffid, 0, feathering, alpha=0.12, color=_PLOT_STYLE["accent"])
-    ax.plot(ffid, feathering, color=_PLOT_STYLE["accent"], linewidth=0.9,
-            label='Feathering', alpha=0.95)
+    # Feathering line with a crisper render path and a distinct color family.
+    ax.fill_between(trace_no, 0, feathering, alpha=0.08, color=fill_color)
+    ax.plot(
+        trace_no,
+        feathering,
+        color=plot_color,
+        linewidth=1.3,
+        label='Feathering',
+        alpha=0.98,
+        antialiased=True,
+        solid_capstyle="round",
+        solid_joinstyle="round",
+    )
 
     # Zero line
     ax.axhline(y=0, color=_PLOT_STYLE["text"], linestyle='--', linewidth=0.6, alpha=0.35)
 
     # Mean line
-    ax.axhline(y=mean_f, color=_PLOT_STYLE["accent2"], linestyle='-.',
+    ax.axhline(y=mean_f, color=mean_color, linestyle='-.',
                linewidth=1.0, alpha=0.6, label=f'Mean: {mean_f:.2f}\u00b0')
 
     # Limit lines
@@ -1007,12 +1026,12 @@ def plot_feathering(df, feathering, planned_azimuth, run_in_m, run_out_m,
     stats_text = "\n".join(stats_lines)
 
     props = dict(boxstyle='round,pad=0.6', facecolor=_PLOT_STYLE["card"],
-                 edgecolor=_PLOT_STYLE["accent"], alpha=0.92, linewidth=1.2)
+                 edgecolor=plot_color, alpha=0.92, linewidth=1.2)
     ax.text(0.015, 0.97, stats_text, transform=ax.transAxes, fontsize=10,
             verticalalignment='top', fontfamily='monospace', color=_PLOT_STYLE["text"],
             bbox=props)
 
-    ax.set_xlabel('FFID', fontweight='bold')
+    ax.set_xlabel('Trace No', fontweight='bold')
     ax.set_ylabel('Feathering Angle (\u00b0)', fontweight='bold')
     ax.set_title(
         f'Feathering Analysis — {line_name}  '
@@ -1033,7 +1052,7 @@ def plot_feathering(df, feathering, planned_azimuth, run_in_m, run_out_m,
 
     _add_watermark(fig)
 
-    plt.savefig(output_path, bbox_inches='tight', pad_inches=0.4)
+    plt.savefig(output_path, bbox_inches='tight', pad_inches=0.4, dpi=220)
     plt.close()
 
     print(f"  그래프 저장: {output_path}")
