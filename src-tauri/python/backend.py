@@ -345,6 +345,8 @@ def _pair_score(npd_path: str, track_path: str) -> tuple[float, str]:
 
 def _safe_path_component(value: str) -> str:
     sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", value).strip("._")
+    while ".." in sanitized:
+        sanitized = sanitized.replace("..", "_")
     return sanitized or "line"
 
 
@@ -369,6 +371,7 @@ def handle_run_analysis(params: dict) -> dict:
         line_name = Path(track_path).stem
         if "_track" in line_name.lower():
             line_name = line_name.split("_track")[0]
+    safe_line_name = _safe_path_component(line_name)
 
     # Output dir 생성
     if output_dir:
@@ -413,12 +416,12 @@ def handle_run_analysis(params: dict) -> dict:
 
     # 5. Save CSV
     progress("saving_csv", "CSV 저장 중...", 65)
-    csv_path = os.path.join(output_dir, f"{line_name}_feathering.csv")
+    csv_path = os.path.join(output_dir, f"{safe_line_name}_feathering.csv")
     matched.to_csv(csv_path, index=False, encoding="utf-8-sig")
 
     # 6. Plot feathering
     progress("plotting_feathering", "Feathering 플롯 생성 중...", 75)
-    plot_path = os.path.join(output_dir, f"{line_name}_feathering.png")
+    plot_path = os.path.join(output_dir, f"{safe_line_name}_feathering.png")
     stats = analyzer.plot_feathering(
         matched, feathering, planned_azimuth,
         run_in_m, run_out_m, feathering_limit,
@@ -427,12 +430,12 @@ def handle_run_analysis(params: dict) -> dict:
 
     # 7. Plot track
     progress("plotting_track", "Track 플롯 생성 중...", 85)
-    track_plot_path = os.path.join(output_dir, f"{line_name}_trackplot.png")
+    track_plot_path = os.path.join(output_dir, f"{safe_line_name}_trackplot.png")
     analyzer.plot_track(matched, line_name, feathering, feathering_limit, track_plot_path)
 
     # 8. Histogram
     progress("plotting_histogram", "히스토그램 생성 중...", 88)
-    histogram_path = os.path.join(output_dir, f"{line_name}_histogram.png")
+    histogram_path = os.path.join(output_dir, f"{safe_line_name}_histogram.png")
     try:
         analyzer.plot_histogram(feathering, feathering_limit, line_name, histogram_path)
     except Exception as e:
@@ -441,7 +444,7 @@ def handle_run_analysis(params: dict) -> dict:
 
     # 9. Generate report
     progress("generating_report", "보고서 생성 중...", 92)
-    report_path = os.path.join(output_dir, f"{line_name}_report.txt")
+    report_path = os.path.join(output_dir, f"{safe_line_name}_report.txt")
     analyzer.generate_report(
         matched, feathering, stats, planned_azimuth,
         run_in_m, run_out_m, line_name, feathering_limit, report_path,
@@ -472,7 +475,7 @@ def handle_run_analysis(params: dict) -> dict:
     }
 
     # PDF 백그라운드 생성
-    pdf_path = os.path.join(output_dir, f"{line_name}_report.pdf")
+    pdf_path = os.path.join(output_dir, f"{safe_line_name}_report.pdf")
     try:
         _generate_pdf(pdf_path, plot_path, track_plot_path,
                        line_name, planned_azimuth, feathering_limit, feathering,

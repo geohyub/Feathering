@@ -7,6 +7,7 @@ import {
   CartesianGrid,
   Tooltip,
   Legend,
+  ReferenceLine,
   ResponsiveContainer,
   ZAxis,
 } from "recharts";
@@ -19,6 +20,23 @@ interface TrackPlotProps {
 }
 
 const MAX_POINTS = 500;
+
+function computeGridLines(min: number, max: number, count: number): number[] {
+  const range = max - min;
+  if (range <= 0) return [];
+  const rawStep = range / (count + 1);
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const niceSteps = [1, 2, 5, 10];
+  const step =
+    magnitude *
+    (niceSteps.find((s) => s * magnitude >= rawStep) || niceSteps[niceSteps.length - 1]);
+  const start = Math.ceil(min / step) * step;
+  const lines: number[] = [];
+  for (let v = start; v <= max; v += step) {
+    lines.push(Math.round(v * 1e6) / 1e6);
+  }
+  return lines;
+}
 
 export function TrackPlot({ data, featheringLimit }: TrackPlotProps) {
   const { sourceNormal, sourceExceeded, headBuoy, tailBuoy } = useMemo(() => {
@@ -73,6 +91,21 @@ export function TrackPlot({ data, featheringLimit }: TrackPlotProps) {
     return v.toLocaleString(undefined, { maximumFractionDigits: 0 });
   };
 
+  // Compute coordinate grid lines for spatial context
+  const { xGridLines, yGridLines } = useMemo(() => {
+    if (data.length === 0) return { xGridLines: [], yGridLines: [] };
+    const allX = data.flatMap((d) => [d.sou_x, d.front_x, d.tail_x].filter(Boolean));
+    const allY = data.flatMap((d) => [d.sou_y, d.front_y, d.tail_y].filter(Boolean));
+    const xMin = Math.min(...allX);
+    const xMax = Math.max(...allX);
+    const yMin = Math.min(...allY);
+    const yMax = Math.max(...allY);
+    return {
+      xGridLines: computeGridLines(xMin, xMax, 4),
+      yGridLines: computeGridLines(yMin, yMax, 4),
+    };
+  }, [data]);
+
   return (
     <ResponsiveContainer width="100%" height={400}>
       <ScatterChart margin={{ top: 10, right: 30, left: 20, bottom: 10 }}>
@@ -124,15 +157,55 @@ export function TrackPlot({ data, featheringLimit }: TrackPlotProps) {
           }}
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           formatter={(value: any, name: any) => [
-            Number(value).toFixed(2),
+            `${Number(value).toFixed(2)} m`,
             name,
           ]}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          labelFormatter={(_: any, payload: any) => {
+            const item = payload?.[0]?.payload;
+            if (!item) return "";
+            return item.ffid ? `FFID ${item.ffid}` : "";
+          }}
         />
         <Legend
           wrapperStyle={{ fontSize: "11px", paddingTop: "8px" }}
           iconSize={8}
           verticalAlign="bottom"
         />
+
+        {/* Coordinate grid lines */}
+        {xGridLines.map((v) => (
+          <ReferenceLine
+            key={`x-${v}`}
+            x={v}
+            stroke="var(--muted-foreground)"
+            strokeOpacity={0.15}
+            strokeDasharray="6 4"
+            label={{
+              value: `E ${formatCoord(v)}`,
+              position: "insideTopRight",
+              fontSize: 8,
+              fill: "var(--muted-foreground)",
+              opacity: 0.5,
+            }}
+          />
+        ))}
+        {yGridLines.map((v) => (
+          <ReferenceLine
+            key={`y-${v}`}
+            y={v}
+            stroke="var(--muted-foreground)"
+            strokeOpacity={0.15}
+            strokeDasharray="6 4"
+            label={{
+              value: `N ${formatCoord(v)}`,
+              position: "insideTopLeft",
+              fontSize: 8,
+              fill: "var(--muted-foreground)",
+              opacity: 0.5,
+            }}
+          />
+        ))}
 
         {/* Head Buoy trace */}
         {headBuoy.length > 0 && (

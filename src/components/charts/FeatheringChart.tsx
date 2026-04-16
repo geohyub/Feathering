@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   ComposedChart,
   Area,
@@ -12,9 +12,41 @@ import {
   Brush,
   ResponsiveContainer,
 } from "recharts";
+import { X } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { lttbDecimate } from "@/lib/decimation";
 import type { AnalysisSummary, ChartDataPoint, FeatheringStats } from "@/types";
+
+interface InspectedPoint {
+  ffid: number;
+  traceNo: number;
+  feathering: number;
+  zone: "run_in" | "main" | "run_out";
+  exceeded: boolean;
+}
+
+function classifyZone(
+  ffid: number,
+  runInEnd: number | null,
+  runOutStart: number | null
+): "run_in" | "main" | "run_out" {
+  if (runInEnd != null && ffid <= runInEnd) return "run_in";
+  if (runOutStart != null && ffid >= runOutStart) return "run_out";
+  return "main";
+}
+
+const zoneLabels: Record<string, string> = {
+  run_in: "Run-in",
+  main: "Main line",
+  run_out: "Run-out",
+};
+
+const zoneColors: Record<string, string> = {
+  run_in: "border-warning/35 bg-warning/10 text-warning",
+  main: "border-primary/35 bg-primary/10 text-primary",
+  run_out: "border-warning/35 bg-warning/10 text-warning",
+};
 
 interface FeatheringChartProps {
   data: ChartDataPoint[];
@@ -35,6 +67,7 @@ export function FeatheringChart({
   runOutM,
   summary,
 }: FeatheringChartProps) {
+  const [inspected, setInspected] = useState<InspectedPoint | null>(null);
   // Decimate data for rendering performance
   const chartData = useMemo(() => {
     const mapped = data.map((d) => ({
@@ -64,6 +97,73 @@ export function FeatheringChart({
   const maxTraceNo = chartData.length > 0 ? chartData[chartData.length - 1].x : 0;
   const lineColor = "#0f766e";
   const fillColor = "#14b8a6";
+
+  const handleChartClick = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (event: any) => {
+      if (!event?.activePayload?.[0]?.payload) return;
+      const payload = event.activePayload[0].payload as {
+        ffid: number;
+        traceNo: number;
+        feathering: number;
+      };
+      const zone = classifyZone(payload.ffid, runInEnd, runOutStart);
+      const exceeded =
+        featheringLimit > 0 && Math.abs(payload.feathering) > featheringLimit;
+      setInspected({
+        ffid: payload.ffid,
+        traceNo: payload.traceNo,
+        feathering: payload.feathering,
+        zone,
+        exceeded,
+      });
+    },
+    [runInEnd, runOutStart, featheringLimit]
+  );
+
+  // Enhanced custom tooltip
+  const renderTooltip = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ({ active, payload, label }: any) => {
+      if (!active || !payload?.[0]) return null;
+      const item = payload[0].payload as {
+        ffid: number;
+        traceNo: number;
+        feathering: number;
+      };
+      const zone = classifyZone(item.ffid, runInEnd, runOutStart);
+      const exceeded =
+        featheringLimit > 0 && Math.abs(item.feathering) > featheringLimit;
+      return (
+        <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-md">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[11px] text-muted-foreground">
+              Trace {Number(label).toLocaleString()}
+            </span>
+            <span className="text-[10px] text-muted-foreground">
+              FFID {item.ffid.toLocaleString()}
+            </span>
+          </div>
+          <div className="mt-1 flex items-center gap-2">
+            <span className="font-mono text-sm font-semibold text-foreground">
+              {item.feathering.toFixed(3)}°
+            </span>
+            <span
+              className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${zoneColors[zone]}`}
+            >
+              {zoneLabels[zone]}
+            </span>
+            {exceeded && (
+              <span className="rounded bg-destructive/15 px-1.5 py-0.5 text-[9px] font-medium text-destructive">
+                EXCEEDED
+              </span>
+            )}
+          </div>
+        </div>
+      );
+    },
+    [runInEnd, runOutStart, featheringLimit]
+  );
 
   return (
     <div className="relative">
@@ -98,10 +198,56 @@ export function FeatheringChart({
         </div>
       </Card>
 
+      {/* Inspected point detail card */}
+      {inspected && (
+        <Card className="absolute left-16 top-2 z-10 bg-card/95 backdrop-blur-sm px-4 py-3 border-border/50 max-w-[260px]">
+          <div className="flex items-start justify-between gap-2">
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className={zoneColors[inspected.zone]}>
+                  {zoneLabels[inspected.zone]}
+                </Badge>
+                {inspected.exceeded && (
+                  <Badge variant="outline" className="border-destructive/35 bg-destructive/10 text-destructive">
+                    EXCEEDED
+                  </Badge>
+                )}
+              </div>
+              <div className="space-y-1 text-[11px] font-mono">
+                <div className="text-muted-foreground">
+                  FFID: <span className="text-foreground font-semibold">{inspected.ffid.toLocaleString()}</span>
+                </div>
+                <div className="text-muted-foreground">
+                  Trace: <span className="text-foreground font-semibold">{inspected.traceNo.toLocaleString()}</span>
+                </div>
+                <div className="text-muted-foreground">
+                  Feathering: <span className="text-chart-2 font-semibold">{inspected.feathering.toFixed(3)}°</span>
+                </div>
+                {featheringLimit > 0 && (
+                  <div className="text-muted-foreground">
+                    Deviation: <span className="text-foreground">
+                      {(Math.abs(inspected.feathering) - featheringLimit).toFixed(3)}°
+                      {inspected.exceeded ? " over" : " under"} limit
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={() => setInspected(null)}
+              className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        </Card>
+      )}
+
       <ResponsiveContainer width="100%" height={360}>
         <ComposedChart
           data={chartData}
           margin={{ top: 10, right: 60, left: 10, bottom: 5 }}
+          onClick={handleChartClick}
         >
           <defs>
             <linearGradient id="featheringFill" x1="0" y1="0" x2="0" y2="1">
@@ -136,20 +282,7 @@ export function FeatheringChart({
             domain={["auto", "auto"]}
           />
 
-          <Tooltip
-            contentStyle={{
-              backgroundColor: "var(--card)",
-              border: "1px solid var(--border)",
-              borderRadius: "6px",
-              fontSize: "11px",
-              fontFamily: "monospace",
-            }}
-            labelStyle={{ color: "var(--muted-foreground)" }}
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            formatter={(value: any) => [`${Number(value).toFixed(3)}°`, "Feathering"]}
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            labelFormatter={(label: any) => `Trace No: ${Number(label).toLocaleString()}`}
-          />
+          <Tooltip content={renderTooltip} />
 
           {/* Run-in zone */}
           {runInEnd && (

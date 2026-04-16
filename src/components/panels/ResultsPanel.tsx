@@ -1,15 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   ExternalLink,
   FileDown,
   FileText,
   Image,
+  Printer,
   Route,
   ShieldAlert,
   Table2,
 } from "lucide-react";
+import { toast } from "sonner";
 import { useAppStore } from "@/stores/appStore";
+import { generateFeatheringPDF } from "@/lib/reportGenerator";
 import type { ChartTabId, VerdictLevel } from "@/types";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -89,7 +92,40 @@ export function ResultsPanel({ analysis }: ResultsPanelProps) {
   const featheringLimit = parseFloat(useAppStore((s) => s.featheringLimit) || "0");
   const runInM = parseFloat(useAppStore((s) => s.runInM) || "0");
   const runOutM = parseFloat(useAppStore((s) => s.runOutM) || "0");
+  const plannedAzimuth = useAppStore((s) => s.plannedAzimuth);
+  const headPosition = useAppStore((s) => s.headPosition);
+  const tailPosition = useAppStore((s) => s.tailPosition);
+  const npdPath = useAppStore((s) => s.npdPath);
+  const trackPath = useAppStore((s) => s.trackPath);
+  const lineName = useAppStore((s) => s.lineName);
   const [activeChart, setActiveChart] = useState<ChartTabId>("feathering");
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+
+  const handleExportPDF = useCallback(() => {
+    if (!stats || !summary) return;
+    setIsGeneratingPDF(true);
+    try {
+      const doc = generateFeatheringPDF({
+        stats,
+        summary,
+        lineName: lineName || summary.matching.line_name || "Unknown",
+        featheringLimit,
+        plannedAzimuth,
+        headPosition,
+        tailPosition,
+        npdPath,
+        trackPath,
+      });
+      const fileName = `Feathering_Report_${(lineName || "analysis").replace(/[^a-zA-Z0-9_-]/g, "_")}.pdf`;
+      doc.save(fileName);
+      toast.success(`PDF 저장 완료: ${fileName}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error(`PDF 생성 실패: ${message}`);
+    } finally {
+      setIsGeneratingPDF(false);
+    }
+  }, [stats, summary, lineName, featheringLimit, plannedAzimuth, headPosition, tailPosition, npdPath, trackPath]);
 
   useEffect(() => {
     if (summary?.recommended_chart) {
@@ -280,6 +316,15 @@ export function ResultsPanel({ analysis }: ResultsPanelProps) {
               </p>
               <Button variant="outline" className="w-full" onClick={() => void analysis.openOutputDir()}>
                 출력 폴더 열기
+              </Button>
+              <Button
+                variant="default"
+                className="w-full"
+                onClick={handleExportPDF}
+                disabled={isGeneratingPDF || !stats || !summary}
+              >
+                <Printer size={14} className="mr-2" />
+                {isGeneratingPDF ? "PDF 생성 중..." : "PDF 리포트 내보내기"}
               </Button>
               <Button variant="secondary" className="w-full" onClick={() => setActivePanel("workspace")}>
                 Compare scenarios
