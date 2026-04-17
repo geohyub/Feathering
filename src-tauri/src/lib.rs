@@ -13,18 +13,42 @@ struct BackendState {
 
 #[tauri::command]
 async fn start_backend(app: AppHandle) -> Result<(), String> {
-    // 프로덕션: resource_dir/python/backend.py
-    // 개발 모드: src-tauri/python/backend.py
-    let backend_script = app
+    // Preferred: PyInstaller-bundled sidecar (resource_dir/python/feathering-backend[.exe]).
+    // Fallback: `python backend.py` — only works on dev machines that
+    // already have Python + deps installed. Shipped installers always
+    // carry the sidecar.
+    let resource_python = app
         .path()
         .resource_dir()
-        .map(|d| d.join("python").join("backend.py"))
-        .and_then(|p| if p.exists() { Ok(p) } else { Err(tauri::Error::AssetNotFound("python/backend.py".into())) })
-        .unwrap_or_else(|_| std::path::PathBuf::from("src-tauri/python/backend.py"));
+        .ok()
+        .map(|d| d.join("python"));
 
-    let mut cmd = Command::new("python");
-    cmd.arg(backend_script.to_string_lossy().to_string())
-        .stdin(Stdio::piped())
+    let sidecar_name = if cfg!(target_os = "windows") {
+        "feathering-backend.exe"
+    } else {
+        "feathering-backend"
+    };
+
+    let sidecar_path = resource_python
+        .as_ref()
+        .map(|p| p.join(sidecar_name))
+        .filter(|p| p.exists());
+
+    let script_path = resource_python
+        .as_ref()
+        .map(|p| p.join("backend.py"))
+        .filter(|p| p.exists())
+        .unwrap_or_else(|| std::path::PathBuf::from("src-tauri/python/backend.py"));
+
+    let mut cmd = if let Some(sidecar) = sidecar_path {
+        Command::new(sidecar)
+    } else {
+        let mut c = Command::new("python");
+        c.arg(script_path.to_string_lossy().to_string());
+        c
+    };
+
+    cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
